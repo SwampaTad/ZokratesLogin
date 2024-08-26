@@ -1,0 +1,95 @@
+{% extends "base.html" %} {% block title %}Login{% endblock %}
+
+{%block content%}
+<form id="login" method="POST">
+    <h3 align="center">Login</h3>
+    <div class="form-group">
+        <label for="email">Login</label>
+        <input
+                type="email"
+                class="form-control"
+                id="email"
+                name="email"
+                placeholder="enter email"
+        />
+    </div>
+    <div class="form-group">
+        <label for="password">Password</label>
+        <input
+                type="password"
+                class="form-control"
+                id="password"
+                name="password"
+                placeholder="Enter password"
+        />
+    </div>
+    <br />
+    <button type="submit" class="btn btn-primary">Login</button>
+</form>
+<script src="https://unpkg.com/zokrates-js@latest/umd.min.js"></script>
+<script>
+    import * as zokrates from "zokrates-js";
+
+    console.log('Javascript Loading and Running');
+    async function hashInput(password) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(password);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const firstPart = hashArray.slice(0,16).reduce((acc, byte) => (acc << 8n) | BigInt(byte), 0n);
+        const secondPart = hashArray.slice(16,32).reduce((acc, byte) => (acc << 8n) | BigInt(byte), 0n);
+        const stringList = [firstpart.toString(), secondpart.toString()];
+        return JSON.stringify(stringList)
+    }
+
+    document.getElementById('login').addEventListener('submit', async function(event) {
+    event.preventDefault();
+
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+
+    try {
+        const response = await fetch('/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ email: email, password: password }),
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            if (result.stored_hash){
+                console.log('Stored Hash:', result.stored_hash);
+
+                const providedHash = await hashInput(password);
+            }
+
+            zokrates.initialize().then((zokratesProvider) => {
+                const source = "def main(private field[2] providedHash, field[2] storedHash) -> bool { return providedHash[0] == storedHash[0] && providedHash[1] == storedHash[1]; }";
+
+                const artifacts = zokratesProvider.compile(source);
+                const { witness, output } = zokratesProvider.computeWitness(artifacts, [providedHash, result.stored_hash]);
+
+                const keypair = zokratesProvider.setup(artifacts.program);
+                const proof = zokratesProvider.generateProof(artifacts.program, witness, keypair.pk);
+                const isVerified = zokratesProvider.verify(keypair.vk, proof);
+
+                if (isVerified) {
+                    alert('Login successful!');
+                    // Redirect to the next page or handle success
+                } else {
+                    alert('Login failed! Hash is wrong');
+                }
+            });
+        } else {
+            const errorResult = await response.json();
+            alert(errorResult.error || 'An error occurred during login.');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred during login.');
+    }
+});
+</script>
+{% endblock %}
