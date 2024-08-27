@@ -17,24 +17,36 @@ def hash_password_for_zokrates(password):
 
     return json.dumps(string_list)
 
+
 @auth.route('/login', methods=['GET', 'POST'])
 def login():
-    if request.is_json:
-        if request.content_type == 'application/json':
+    if request.method == 'POST':
+        if request.is_json:
             data = request.get_json()
+            email = data.get('email')
+            password = data.get('password')
+        else:
             email = request.form.get('email')
             password = request.form.get('password')
 
-            user = User.query.filter_by(email=email).first()
-            if user:
-                stored_hash = ast.literal_eval(user.password)
+        print(f"Login attempt for email: {email}") 
+
+        user = User.query.filter_by(email=email).first()
+        if user:
+            stored_hash = ast.literal_eval(user.password)
+            print(f"Stored hash for user: {stored_hash}") 
+            if request.is_json:
                 return jsonify({'stored_hash': stored_hash})
-                #return render_template("login.html", user=current_user, stored_hash=stored_hash)
             else:
-                return jsonify({'error':'Invalid email or pass'}),401
+                login_user(user)
+                return redirect(url_for('views.home'))
         else:
-            flash('Login failed, check your email.', category ='error')
-            return redirect(url_for('auth.login'))
+            error_message = 'Invalid email or password'
+            print(error_message) 
+            if request.is_json:
+                return jsonify({'error': error_message}), 401
+            else:
+                flash(error_message, category='error')
 
     return render_template("login.html", user=current_user)
 
