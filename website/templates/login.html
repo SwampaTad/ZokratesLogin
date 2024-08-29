@@ -28,81 +28,103 @@
 </form>
 <script src="https://unpkg.com/zokrates-js@latest/umd.min.js"></script>
 <script>
-    console.log('Script tag reached')
-(function() {
-    console.log('JavaScript is running');
+    console.log('Script tag reached');
+    (function() {
+        let zokratesProvider;
+        zokrates.initialize().then((zokratesProvider) => {
+            console.log('Zokrates initialized');
+        }).catch(error => {
+            console.error('Failed to initialize Zokrates:', error);
+        });
 
-    async function hashInput(password) {
-        console.log('Hashing password');
-        const encoder = new TextEncoder();
-        const data = encoder.encode(password);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const firstPart = hashArray.slice(0,16).reduce((acc, byte) => (acc << 8n) | BigInt(byte), 0n);
-        const secondPart = hashArray.slice(16,32).reduce((acc, byte) => (acc << 8n) | BigInt(byte), 0n);
-        const stringList = [firstPart.toString(), secondPart.toString()];
-        return JSON.stringify(stringList);
-    }
+        async function hashInput(password) {
+            console.log('Hashing password');
+            const encoder = new TextEncoder();
+            const data = encoder.encode(password);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const firstPart = hashArray.slice(0, 16).reduce((acc, byte) => (acc << 8n) | BigInt(byte), 0n);
+            const secondPart = hashArray.slice(16, 32).reduce((acc, byte) => (acc << 8n) | BigInt(byte), 0n);
+            const stringList = [firstPart.toString(), secondPart.toString()];
+            return JSON.stringify(stringList);
+        }
 
-    async function handleLogin(event) {
-        event.preventDefault();
-        console.log('Login form submitted');
-        const email = document.getElementById('email').value;
-        const password = document.getElementById('password').value;
-        try {
-            const response = await fetch('{{ url_for("auth.login") }}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ email: email, password: password }),
-            });
-            console.log('Response status:', response.status);
-            if (response.ok) {
-                const result = await response.json();
-                console.log('Login response:', result);
-                if (result.stored_hash) {
-                    console.log('Stored Hash:', result.stored_hash);
-                    const providedHash = await hashInput(password);
-                    
-                    console.log('Initializing Zokrates');
-                    const zokratesProvider = await zokrates.initialize();
-                    const source = "def main(private field[2] providedHash, field[2] storedHash) -> bool { return providedHash[0] == storedHash[0] && providedHash[1] == storedHash[1]; }";
-                    const artifacts = zokratesProvider.compile(source);
-                    const { witness, output } = zokratesProvider.computeWitness(artifacts, [JSON.parse(providedHash), result.stored_hash]);
-                    const keypair = zokratesProvider.setup(artifacts.program);
-                    const proof = zokratesProvider.generateProof(artifacts.program, witness, keypair.pk);
-                    const isVerified = zokratesProvider.verify(keypair.vk, proof);
-                    if (isVerified) {
-                        console.log('Login successful');
-                        alert('Login successful!');
-                        window.location.href = '{{ url_for("views.home")}}'
+        async function handleLogin(event) {
+            event.preventDefault();
+            console.log('Login form submitted');
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            try {
+                const response = await fetch('{{ url_for("auth.login") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({email: email}),
+                });
+                console.log('Response status:', response.status);
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('Login response:', result);
+                    if (result.success && result.stored_hash) {
+                        console.log('Stored Hash:', result.stored_hash);
+                        const providedHash = await hashInput(password);
+
+                        console.log('Verifying with Zokrates');
+                        const source = "def main(private field[2] providedHash, field[2] storedHash) -> bool { return providedHash[0] == storedHash[0] && providedHash[1] == storedHash[1]; }";
+                        const artifacts = zokratesProvider.compile(source);
+                        const {
+                            witness,
+                            output
+                        } = zokratesProvider.computeWitness(artifacts, [JSON.parse(providedHash), result.stored_hash]);
+                        const keypair = zokratesProvider.setup(artifacts.program);
+                        const proof = zokratesProvider.generateProof(artifacts.program, witness, keypair.pk);
+                        const isVerified = zokratesProvider.verify(keypair.vk, proof);
+                        if (isVerified) {
+                            console.log('Login successful');
+                            // Send verification result to server
+                            const verifyResponse = await fetch('{{ url_for("auth.login_verify") }}', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({email: email, verified: true}),
+                            });
+                            const verifyResult = await verifyResponse.json();
+                            if (verifyResult.success) {
+                                window.location.href = verifyResult.redirect;
+                            } else {
+                                alert('Login failed: ' + verifyResult.error);
+                            }
+                        } else {
+                            console.log('Login failed');
+                            alert('Login failed! Incorrect password.');
+                        }
                     } else {
-                        console.log('Login failed');
-                        alert('Login failed! Hash is wrong');
+                        console.error('Login error:', result.error);
+                        alert(result.error || 'An error occurred during login.');
                     }
+                } else {
+                    const errorResult = await response.json();
+                    console.error('Login error:', errorResult);
+                    alert(errorResult.error || 'An error occurred during login.');
                 }
-            } else {
-                const errorResult = await response.json();
-                console.error('Login error:', errorResult);
-                alert(errorResult.error || 'An error occurred during login.');
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred during login.');
             }
-        } catch (error) {
-            console.error('Error:', error);
-            alert('An error occurred during login.');
         }
-    }
 
-    document.addEventListener('DOMContentLoaded', function() {
-        console.log('DOM fully loaded');
-        const loginForm = document.getElementById('login');
-        if (loginForm) {
-            console.log('Login form found');
-            loginForm.addEventListener('submit', handleLogin);
-        } else {
-            console.error('Login form not found');
-        }
-    });
-})();
+        document.addEventListener('DOMContentLoaded', function () {
+            console.log('DOM fully loaded');
+            const loginForm = document.getElementById('login');
+            if (loginForm) {
+                console.log('Login form found');
+                loginForm.addEventListener('submit', handleLogin);
+            } else {
+                console.error('Login form not found');
+            }
+        });
+    })();
 </script>
 {% endblock %}

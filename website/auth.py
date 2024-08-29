@@ -21,34 +21,40 @@ def hash_password_for_zokrates(password):
 @auth.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        if request.is_json:
-            data = request.get_json()
-            email = data.get('email')
-            password = data.get('password')
-        else:
-            email = request.form.get('email')
-            password = request.form.get('password')
+        email = request.form.get('email') or request.json.get('email')
+        password = request.form.get('password')
 
-        print(f"Login attempt for email: {email}") 
-
+        print(f"Login attempt for email: {email}")
         user = User.query.filter_by(email=email).first()
         if user:
             stored_hash = ast.literal_eval(user.password)
-            print(f"Stored hash for user: {stored_hash}") 
             if request.is_json:
-                return jsonify({'stored_hash': stored_hash})
+                return jsonify({'stored_hash': stored_hash, 'success': True})
             else:
-                login_user(user)
-                return redirect(url_for('views.home'))
+                print("JS not reached")
         else:
-            error_message = 'Invalid email or password'
-            print(error_message) 
+            error_message = 'Email does not exist.'
             if request.is_json:
-                return jsonify({'error': error_message}), 401
+                return jsonify({'error': error_message, 'success': False}), 401
             else:
                 flash(error_message, category='error')
 
     return render_template("login.html", user=current_user)
+
+
+@auth.route('/login_verify', methods=['POST'])
+def login_verify():
+    data = request.get_json()
+    email = data.get('email')
+    verified = data.get('verified')
+
+    if verified:
+        user = User.query.filter_by(email=email).first()
+        if user:
+            login_user(user)
+            return jsonify({'success': True, 'redirect': url_for('views.home')})
+
+    return jsonify({'success': False, 'error': 'Verification failed'}), 401
 
 @auth.route('/logout')
 @login_required
